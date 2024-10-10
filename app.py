@@ -43,8 +43,6 @@ if uploaded_file is not None:
         min_average_cost = st.sidebar.slider("Minimum Average Cost", 0, 100, 0)
         user_profit_rate = st.sidebar.slider("User Profit Rate (%)", 0, 100, (0, 10))
         min_user_win_lose = st.sidebar.number_input("Minimum User Win/Lose", -1000, 1000, 0)
-        
-        # Add Maximum Range of Bet Amount slider
         max_bet_amount_range = st.sidebar.slider("Maximum Range of Bet Amount", 0, 100, 50)
 
         apply_filter = st.sidebar.button("Apply Filter")
@@ -53,9 +51,7 @@ if uploaded_file is not None:
         if required_columns.issubset(df.columns):
             if apply_filter:
                 # Calculate the range in number_cost and filter based on it
-                df['bet_amount_range'] = df['number_cost'].apply(
-                    lambda nc: max(ast.literal_eval(nc).values()) - min(ast.literal_eval(nc).values()) if nc else 0
-                )
+                df['bet_amount_range'] = df['number_cost'].apply(lambda nc: max(ast.literal_eval(nc).values()) - min(ast.literal_eval(nc).values()) if nc else 0)
 
                 # Filter data based on input criteria
                 filtered_df = df[
@@ -117,9 +113,7 @@ if uploaded_file is not None:
                     pre_filtered_df = expand_list_column(pre_filtered_df, col)
 
                 # Group by selected columns, with unique identification by username and ref_provider combination
-                grouped_df = pre_filtered_df.groupby(selected_columns).filter(
-                    lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1
-                )
+                grouped_df = pre_filtered_df.groupby(selected_columns).filter(lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1)
                 
                 if not grouped_df.empty:
                     combined_results = []
