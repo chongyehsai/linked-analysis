@@ -11,12 +11,12 @@ st.title("Game Data Analysis Tool :game_die:")
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 page = st.sidebar.selectbox("Select Filter Page", ["Individual Filter", "Related Group Filter"])
 
-# Initialize session state for button click tracking
-if "apply_filter_clicked" not in st.session_state:
-    st.session_state.apply_filter_clicked = False
+# Initialize session state for filters
+if "apply_filter" not in st.session_state:
+    st.session_state.apply_filter = False
 
-if "apply_group_filter_clicked" not in st.session_state:
-    st.session_state.apply_group_filter_clicked = False
+if "apply_group_filter" not in st.session_state:
+    st.session_state.apply_group_filter = False
 
 # Function to safely evaluate and keep list-like columns intact
 def evaluate_list_column(df, column):
@@ -45,6 +45,7 @@ def parse_number_cost(nc):
 def format_group_keys(columns, keys):
     return "; ".join([f"{col}: {key}" if not isinstance(key, tuple) else f"{col}: {', '.join(key)}" for col, key in zip(columns, keys)])
 
+# Update filters state without re-running the entire code
 if uploaded_file:
     # Load CSV in chunks to avoid memory overload
     try:
@@ -76,19 +77,17 @@ if uploaded_file:
         # Individual Filter Page
         if page == "Individual Filter":
             st.subheader("Individual Filter")
-
+            
             unique_number_count = st.sidebar.slider("Unique Number Count", 0, 100, (70, 100))
             min_average_cost = st.sidebar.slider("Minimum Average Cost", 0, 100, 0)
             user_profit_rate = st.sidebar.slider("User Profit Rate (%)", 0, 100, (0, 10))
             min_user_win_lose = st.sidebar.number_input("Minimum User Win/Lose", -1000, 1000, 0)
             max_bet_amount_range = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
 
-            # Only change the state when the button is clicked
             if st.sidebar.button("Apply Filter"):
-                st.session_state.apply_filter_clicked = True
+                st.session_state.apply_filter = True
 
-            if st.session_state.apply_filter_clicked:
-                # Execute the filter logic only when the button is pressed
+            if st.session_state.apply_filter:
                 filtered_df = df.query(
                     "unique_number_count >= @unique_number_count[0] and unique_number_count <= @unique_number_count[1] and "
                     "average_cost >= @min_average_cost and "
@@ -120,12 +119,10 @@ if uploaded_file:
             group_min_user_win_lose = st.sidebar.number_input("Minimum Group Win/Lose", -10000, 10000, 0)
             max_cost_difference = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
 
-            # Only change the state when the button is clicked
             if st.sidebar.button("Apply Group Filter"):
-                st.session_state.apply_group_filter_clicked = True
+                st.session_state.apply_group_filter = True
 
-            if st.session_state.apply_group_filter_clicked and selected_columns:
-                # Execute the group filter logic only when the button is pressed
+            if st.session_state.apply_group_filter and selected_columns:
                 try:
                     pre_filtered_df = df.query("average_cost > @pre_group_min_avg_cost and unique_number_count > @pre_group_min_unique_count")
                     grouped_df = pre_filtered_df.groupby(selected_columns).filter(lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1)
