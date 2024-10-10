@@ -18,15 +18,6 @@ if "apply_filter" not in st.session_state:
 if "apply_group_filter" not in st.session_state:
     st.session_state.apply_group_filter = False
 
-if "df" not in st.session_state:
-    st.session_state.df = None
-
-if "filtered_df" not in st.session_state:
-    st.session_state.filtered_df = None
-
-if "grouped_results" not in st.session_state:
-    st.session_state.grouped_results = None
-
 # Function to safely evaluate and keep list-like columns intact
 def evaluate_list_column(df, column):
     def safe_eval(value):
@@ -54,59 +45,50 @@ def parse_number_cost(nc):
 def format_group_keys(columns, keys):
     return "; ".join([f"{col}: {key}" if not isinstance(key, tuple) else f"{col}: {', '.join(key)}" for col, key in zip(columns, keys)])
 
-# Load and cache the data to avoid reloading on each interaction
-@st.cache_data
-def load_data(file):
-    chunk_size = 10000
-    filtered_chunks = []
-    for chunk in pd.read_csv(file, chunksize=chunk_size, dtype={'username': str}):
-        chunk['username'] = chunk['username'].str.lstrip('0')
-        filtered_chunks.append(chunk)
-    df = pd.concat(filtered_chunks, ignore_index=True)
-    return df
-
 # Update filters state without re-running the entire code
 if uploaded_file:
-    if st.session_state.df is None:
-        try:
-            st.session_state.df = load_data(uploaded_file)
-        except Exception as e:
-            st.error(f"Error loading data: {e}")
-            st.stop()
-    
-    df = st.session_state.df
+    # Load CSV in chunks to avoid memory overload
+    try:
+        chunk_size = 10000
+        filtered_chunks = []
 
-    # Display a sample of the data
-    st.write(f"Sample Data (Total rows: {df.shape[0]}):")
-    st.dataframe(df.head(10))
+        for chunk in pd.read_csv(uploaded_file, chunksize=chunk_size, dtype={'username': str}):
+            chunk['username'] = chunk['username'].str.lstrip('0')
+            filtered_chunks.append(chunk)
 
-    # Check for missing columns and add them if necessary
-    required_columns = {'average_cost', 'unique_number_count', 'user_profit_rate', 'user_win_lose', 'number_cost'}
-    for col in required_columns:
-        if col not in df.columns:
-            df[col] = 0
+        df = pd.concat(filtered_chunks, ignore_index=True)
 
-    # Parse `number_cost` safely and calculate bet amount range
-    df['parsed_number_cost'] = df['number_cost'].apply(parse_number_cost)
-    df['bet_amount_range'] = df['parsed_number_cost'].apply(
-        lambda nc: max(nc.values()) - min(nc.values()) if nc else 0
-    )
+        # Display a sample of the data
+        st.write(f"Sample Data (Total rows: {df.shape[0]}):")
+        st.dataframe(df.head(10))
 
-    # Individual Filter Page
-    if page == "Individual Filter":
-        st.subheader("Individual Filter")
-        
-        unique_number_count = st.sidebar.slider("Unique Number Count", 0, 100, (70, 100))
-        min_average_cost = st.sidebar.slider("Minimum Average Cost", 0, 100, 0)
-        user_profit_rate = st.sidebar.slider("User Profit Rate (%)", 0, 100, (0, 10))
-        min_user_win_lose = st.sidebar.number_input("Minimum User Win/Lose", -1000, 1000, 0)
-        max_bet_amount_range = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
+        # Check for missing columns and add them if necessary
+        required_columns = {'average_cost', 'unique_number_count', 'user_profit_rate', 'user_win_lose', 'number_cost'}
+        for col in required_columns:
+            if col not in df.columns:
+                df[col] = 0
 
-        if st.sidebar.button("Apply Filter") or st.session_state.apply_filter:
-            st.session_state.apply_filter = True
+        # Parse `number_cost` safely and calculate bet amount range
+        df['parsed_number_cost'] = df['number_cost'].apply(parse_number_cost)
+        df['bet_amount_range'] = df['parsed_number_cost'].apply(
+            lambda nc: max(nc.values()) - min(nc.values()) if nc else 0
+        )
 
-            if st.session_state.filtered_df is None or st.sidebar.button("Apply Filter"):
-                st.session_state.filtered_df = df.query(
+        # Individual Filter Page
+        if page == "Individual Filter":
+            st.subheader("Individual Filter")
+            
+            unique_number_count = st.sidebar.slider("Unique Number Count", 0, 100, (70, 100))
+            min_average_cost = st.sidebar.slider("Minimum Average Cost", 0, 100, 0)
+            user_profit_rate = st.sidebar.slider("User Profit Rate (%)", 0, 100, (0, 10))
+            min_user_win_lose = st.sidebar.number_input("Minimum User Win/Lose", -1000, 1000, 0)
+            max_bet_amount_range = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
+
+            if st.sidebar.button("Apply Filter"):
+                st.session_state.apply_filter = True
+
+            if st.session_state.apply_filter:
+                filtered_df = df.query(
                     "unique_number_count >= @unique_number_count[0] and unique_number_count <= @unique_number_count[1] and "
                     "average_cost >= @min_average_cost and "
                     "user_profit_rate >= @user_profit_rate[0] and user_profit_rate <= @user_profit_rate[1] and "
@@ -114,35 +96,33 @@ if uploaded_file:
                     "bet_amount_range <= @max_bet_amount_range"
                 )
 
-            filtered_df = st.session_state.filtered_df
+                st.write(f"Filtered Data (Total rows: {filtered_df.shape[0]}):")
+                st.dataframe(filtered_df)
 
-            st.write(f"Filtered Data (Total rows: {filtered_df.shape[0]}):")
-            st.dataframe(filtered_df)
+                # Download button for filtered data
+                csv = filtered_df.to_csv(index=False).encode('utf-8')
+                st.download_button("Download Filtered Data as CSV", csv, 'filtered_individual.csv', 'text/csv')
 
-            # Download button for filtered data
-            csv = filtered_df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Filtered Data as CSV", csv, 'filtered_individual.csv', 'text/csv')
+        # Related Group Filter Page
+        elif page == "Related Group Filter":
+            st.subheader("Related Group Filter")
 
-    # Related Group Filter Page
-    elif page == "Related Group Filter":
-        st.subheader("Related Group Filter")
+            filter_criteria = {'IP': 'ip', 'Registered IP': 'registered_ip', 'Hash Password': 'hash_password', 'Device ID': 'device_id', 'RNG': 'rng'}
+            selected_columns = [col for label, col in filter_criteria.items() if st.sidebar.checkbox(f"Filter by {label}", value=(label == 'IP'))]
 
-        filter_criteria = {'IP': 'ip', 'Registered IP': 'registered_ip', 'Hash Password': 'hash_password', 'Device ID': 'device_id', 'RNG': 'rng'}
-        selected_columns = [col for label, col in filter_criteria.items() if st.sidebar.checkbox(f"Filter by {label}", value=(label == 'IP'))]
+            pre_group_min_avg_cost = st.sidebar.slider("Minimum Individual Average Cost before Grouping", 0, 100, 0)
+            pre_group_min_unique_count = st.sidebar.slider("Minimum Individual Unique Number Count before Grouping", 0, 100, 10)
 
-        pre_group_min_avg_cost = st.sidebar.slider("Minimum Individual Average Cost before Grouping", 0, 100, 0)
-        pre_group_min_unique_count = st.sidebar.slider("Minimum Individual Unique Number Count before Grouping", 0, 100, 10)
+            group_unique_number_count = st.sidebar.slider("Group Unique Number Count", 0, 100, (70, 100))
+            group_min_average_cost = st.sidebar.slider("Group Minimum Average Cost", 0, 100, 0)
+            group_user_profit_rate = st.sidebar.slider("Group Profit Rate (%)", 0, 100, (0, 10))
+            group_min_user_win_lose = st.sidebar.number_input("Minimum Group Win/Lose", -10000, 10000, 0)
+            max_cost_difference = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
 
-        group_unique_number_count = st.sidebar.slider("Group Unique Number Count", 0, 100, (70, 100))
-        group_min_average_cost = st.sidebar.slider("Group Minimum Average Cost", 0, 100, 0)
-        group_user_profit_rate = st.sidebar.slider("Group Profit Rate (%)", 0, 100, (0, 10))
-        group_min_user_win_lose = st.sidebar.number_input("Minimum Group Win/Lose", -10000, 10000, 0)
-        max_cost_difference = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
+            if st.sidebar.button("Apply Group Filter"):
+                st.session_state.apply_group_filter = True
 
-        if st.sidebar.button("Apply Group Filter") or st.session_state.apply_group_filter:
-            st.session_state.apply_group_filter = True
-
-            if st.session_state.grouped_results is None or st.sidebar.button("Apply Group Filter"):
+            if st.session_state.apply_group_filter and selected_columns:
                 try:
                     pre_filtered_df = df.query("average_cost > @pre_group_min_avg_cost and unique_number_count > @pre_group_min_unique_count")
                     grouped_df = pre_filtered_df.groupby(selected_columns).filter(lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1)
@@ -209,5 +189,10 @@ if uploaded_file:
                         st.info("No related records found for the selected criteria.")
                 except KeyError as e:
                     st.warning(f"Missing column: {e}")
+
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        st.stop()
+
 else:
     st.write("Please upload a CSV file.")
