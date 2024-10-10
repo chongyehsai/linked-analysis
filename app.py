@@ -11,11 +11,22 @@ st.title("Game Data Analysis Tool :game_die:")
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 page = st.sidebar.selectbox("Select Filter Page", ["Individual Filter", "Related Group Filter"])
 
+# Function to safely evaluate and expand columns containing lists
 def expand_list_column(df, column):
-    # Expand list-like values into individual rows, keep non-list values as is
-    df[column] = df[column].apply(lambda x: ast.literal_eval(x) if isinstance(x, str) else x)
-    df_expanded = df.explode(column)
-    return df_expanded
+    def safe_eval(value):
+        try:
+            # Evaluate only if it's a string formatted as a list
+            if isinstance(value, str):
+                return ast.literal_eval(value)
+            return value
+        except (ValueError, SyntaxError):
+            return value  # Return the value as-is if it's not evaluable
+    
+    # Apply safe evaluation and expand the list
+    df[column] = df[column].apply(safe_eval)
+    if df[column].apply(lambda x: isinstance(x, list)).any():  # Check if any list entries exist
+        df = df.explode(column)
+    return df
 
 if uploaded_file is not None:
     try:
@@ -33,6 +44,11 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Error loading data: {e}")
         st.stop()
+
+    # Apply expand_list_column to all list-like columns
+    list_columns = ['ip', 'registered_ip', 'hash_password', 'device_id', 'rng']
+    for col in list_columns:
+        df = expand_list_column(df, col)
 
     # Individual Filter Page
     if page == "Individual Filter":
