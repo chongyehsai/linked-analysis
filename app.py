@@ -11,21 +11,17 @@ st.title("Game Data Analysis Tool :game_die:")
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 page = st.sidebar.selectbox("Select Filter Page", ["Individual Filter", "Related Group Filter"])
 
-# Function to safely evaluate and expand columns containing lists
-def expand_list_column(df, column):
+# Function to safely evaluate and keep list-like columns intact
+def evaluate_list_column(df, column):
     def safe_eval(value):
         try:
-            # Evaluate only if it's a string formatted as a list
             if isinstance(value, str):
                 return ast.literal_eval(value)
             return value
         except (ValueError, SyntaxError):
-            return value  # Return the value as-is if it's not evaluable
+            return value
     
-    # Apply safe evaluation and expand the list
     df[column] = df[column].apply(safe_eval)
-    if df[column].apply(lambda x: isinstance(x, list)).any():  # Check if any list entries exist
-        df = df.explode(column)
     return df
 
 if uploaded_file is not None:
@@ -45,10 +41,10 @@ if uploaded_file is not None:
         st.error(f"Error loading data: {e}")
         st.stop()
 
-    # Apply expand_list_column to all list-like columns
+    # Apply evaluate_list_column to specified list-like columns without exploding them
     list_columns = ['ip', 'registered_ip', 'hash_password', 'device_id', 'rng']
     for col in list_columns:
-        df = expand_list_column(df, col)
+        df = evaluate_list_column(df, col)
 
     # Individual Filter Page
     if page == "Individual Filter":
@@ -79,7 +75,7 @@ if uploaded_file is not None:
                 ]
 
                 st.write(f"Filtered Data (Total rows: {filtered_df.shape[0]}):")
-                st.dataframe(filtered_df)
+                st.dataframe(filtered_df)  # Display the dataframe with list values intact
 
                 # Download option for filtered data
                 csv = filtered_df.to_csv(index=False).encode('utf-8')
@@ -124,11 +120,7 @@ if uploaded_file is not None:
                     (df['unique_number_count'] > pre_group_min_unique_count)
                 ]
 
-                # Expand list columns to handle multiple values
-                for col in selected_columns:
-                    pre_filtered_df = expand_list_column(pre_filtered_df, col)
-
-                # Group by selected columns, with unique identification by username and ref_provider combination
+                # Group by selected columns, maintaining list structure in the output
                 grouped_df = pre_filtered_df.groupby(selected_columns).filter(lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1)
                 
                 if not grouped_df.empty:
@@ -142,15 +134,10 @@ if uploaded_file is not None:
                         for d in group_data['number_cost']:
                             combined_number_cost.update(ast.literal_eval(d))
 
-                        # Sort by keys (numbers) and sum values for duplicate keys
                         sorted_combined_number_cost = dict(sorted(combined_number_cost.items()))
 
-                        # Calculate max-min range for combined_number_cost values
-                        if sorted_combined_number_cost:
-                            cost_values = list(sorted_combined_number_cost.values())
-                            cost_range = max(cost_values) - min(cost_values)
-                        else:
-                            cost_range = 0
+                        cost_values = list(sorted_combined_number_cost.values())
+                        cost_range = max(cost_values) - min(cost_values) if cost_values else 0
 
                         total_cost = group_data['total_cost'].sum()
                         total_rewards = group_data['rewards'].sum()
