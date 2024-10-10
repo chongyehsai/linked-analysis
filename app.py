@@ -59,7 +59,7 @@ if uploaded_file is not None:
         min_average_cost = st.sidebar.slider("Minimum Average Cost", 0, 100, 0)
         user_profit_rate = st.sidebar.slider("User Profit Rate (%)", 0, 100, (0, 10))
         min_user_win_lose = st.sidebar.number_input("Minimum User Win/Lose", -1000, 1000, 0)
-        max_bet_amount_range = st.sidebar.slider("Maximum Range of Bet Amount", 0, 100, 50)
+        max_bet_amount_range = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
 
         apply_filter = st.sidebar.button("Apply Filter")
         
