@@ -24,6 +24,16 @@ def evaluate_list_column(df, column):
     df[column] = df[column].apply(safe_eval)
     return df
 
+# Format group keys for better readability
+def format_group_keys(columns, keys):
+    formatted_keys = []
+    for col, key in zip(columns, keys):
+        if isinstance(key, tuple):
+            formatted_keys.append(f"{col}: {', '.join(key)}")
+        else:
+            formatted_keys.append(f"{col}: {key}")
+    return "; ".join(formatted_keys)
+
 if uploaded_file is not None:
     try:
         # Load CSV in chunks to avoid memory overload
@@ -45,6 +55,11 @@ if uploaded_file is not None:
     list_columns = ['ip', 'registered_ip', 'hash_password', 'device_id', 'rng']
     for col in list_columns:
         df = evaluate_list_column(df, col)
+
+    # Convert list columns to tuples for grouping to avoid "unhashable type: 'list'" error
+    for col in list_columns:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
     # Individual Filter Page
     if page == "Individual Filter":
@@ -120,9 +135,9 @@ if uploaded_file is not None:
                     (df['unique_number_count'] > pre_group_min_unique_count)
                 ]
 
-                # Group by selected columns, maintaining list structure in the output
+                # Group by selected columns with tuples instead of lists
                 grouped_df = pre_filtered_df.groupby(selected_columns).filter(lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1)
-                
+
                 if not grouped_df.empty:
                     combined_results = []
                     member_details_list = []
@@ -163,7 +178,9 @@ if uploaded_file is not None:
                                 'combined_user_profit_rate': user_profit_rate
                             })
 
-                            st.write(f"Group with {selected_columns}: {group_keys}")
+                            # Format the group keys for display
+                            group_keys_formatted = format_group_keys(selected_columns, group_keys)
+                            st.write(f"Group with {group_keys_formatted}")
                             st.dataframe(group_data)
                             member_details_list.append(group_data)
                             st.write("---")
