@@ -21,6 +21,12 @@ if "apply_group_filter" not in st.session_state:
 if "df" not in st.session_state:
     st.session_state.df = None
 
+if "filtered_df" not in st.session_state:
+    st.session_state.filtered_df = None
+
+if "grouped_results" not in st.session_state:
+    st.session_state.grouped_results = None
+
 # Function to safely evaluate and keep list-like columns intact
 def evaluate_list_column(df, column):
     def safe_eval(value):
@@ -96,17 +102,19 @@ if uploaded_file:
         min_user_win_lose = st.sidebar.number_input("Minimum User Win/Lose", -1000, 1000, 0)
         max_bet_amount_range = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
 
-        if st.sidebar.button("Apply Filter"):
+        if st.sidebar.button("Apply Filter") or st.session_state.apply_filter:
             st.session_state.apply_filter = True
 
-        if st.session_state.apply_filter:
-            filtered_df = df.query(
-                "unique_number_count >= @unique_number_count[0] and unique_number_count <= @unique_number_count[1] and "
-                "average_cost >= @min_average_cost and "
-                "user_profit_rate >= @user_profit_rate[0] and user_profit_rate <= @user_profit_rate[1] and "
-                "user_win_lose >= @min_user_win_lose and "
-                "bet_amount_range <= @max_bet_amount_range"
-            )
+            if st.session_state.filtered_df is None or st.sidebar.button("Apply Filter"):
+                st.session_state.filtered_df = df.query(
+                    "unique_number_count >= @unique_number_count[0] and unique_number_count <= @unique_number_count[1] and "
+                    "average_cost >= @min_average_cost and "
+                    "user_profit_rate >= @user_profit_rate[0] and user_profit_rate <= @user_profit_rate[1] and "
+                    "user_win_lose >= @min_user_win_lose and "
+                    "bet_amount_range <= @max_bet_amount_range"
+                )
+
+            filtered_df = st.session_state.filtered_df
 
             st.write(f"Filtered Data (Total rows: {filtered_df.shape[0]}):")
             st.dataframe(filtered_df)
@@ -131,75 +139,75 @@ if uploaded_file:
         group_min_user_win_lose = st.sidebar.number_input("Minimum Group Win/Lose", -10000, 10000, 0)
         max_cost_difference = st.sidebar.slider("Maximum Cost Difference", 0, 100, 50)
 
-        if st.sidebar.button("Apply Group Filter"):
+        if st.sidebar.button("Apply Group Filter") or st.session_state.apply_group_filter:
             st.session_state.apply_group_filter = True
 
-        if st.session_state.apply_group_filter and selected_columns:
-            try:
-                pre_filtered_df = df.query("average_cost > @pre_group_min_avg_cost and unique_number_count > @pre_group_min_unique_count")
-                grouped_df = pre_filtered_df.groupby(selected_columns).filter(lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1)
+            if st.session_state.grouped_results is None or st.sidebar.button("Apply Group Filter"):
+                try:
+                    pre_filtered_df = df.query("average_cost > @pre_group_min_avg_cost and unique_number_count > @pre_group_min_unique_count")
+                    grouped_df = pre_filtered_df.groupby(selected_columns).filter(lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1)
 
-                if not grouped_df.empty:
-                    combined_results = []
-                    member_details_list = []
+                    if not grouped_df.empty:
+                        combined_results = []
+                        member_details_list = []
 
-                    grouped = grouped_df.groupby(selected_columns)
-                    
-                    for group_keys, group_data in grouped:
-                        combined_number_cost = Counter()
-                        for d in group_data['parsed_number_cost']:
-                            combined_number_cost.update(d)
+                        grouped = grouped_df.groupby(selected_columns)
+                        
+                        for group_keys, group_data in grouped:
+                            combined_number_cost = Counter()
+                            for d in group_data['parsed_number_cost']:
+                                combined_number_cost.update(d)
 
-                        sorted_combined_number_cost = dict(sorted(combined_number_cost.items()))
-                        cost_values = list(sorted_combined_number_cost.values())
-                        cost_range = max(cost_values) - min(cost_values) if cost_values else 0
+                            sorted_combined_number_cost = dict(sorted(combined_number_cost.items()))
+                            cost_values = list(sorted_combined_number_cost.values())
+                            cost_range = max(cost_values) - min(cost_values) if cost_values else 0
 
-                        total_cost = group_data['total_cost'].sum()
-                        total_rewards = group_data['rewards'].sum()
-                        unique_number_count = len(sorted_combined_number_cost)
-                        average_cost = total_cost / unique_number_count if unique_number_count > 0 else 0
-                        user_win_lose = total_rewards - total_cost
-                        user_profit_rate = (user_win_lose / total_rewards * 100) if total_rewards > 0 else 0
+                            total_cost = group_data['total_cost'].sum()
+                            total_rewards = group_data['rewards'].sum()
+                            unique_number_count = len(sorted_combined_number_cost)
+                            average_cost = total_cost / unique_number_count if unique_number_count > 0 else 0
+                            user_win_lose = total_rewards - total_cost
+                            user_profit_rate = (user_win_lose / total_rewards * 100) if total_rewards > 0 else 0
 
-                        if (cost_range <= max_cost_difference and
-                            group_unique_number_count[0] <= unique_number_count <= group_unique_number_count[1] and
-                            average_cost >= group_min_average_cost and
-                            group_user_profit_rate[0] <= user_profit_rate <= group_user_profit_rate[1] and
-                            user_win_lose >= group_min_user_win_lose):
+                            if (cost_range <= max_cost_difference and
+                                group_unique_number_count[0] <= unique_number_count <= group_unique_number_count[1] and
+                                average_cost >= group_min_average_cost and
+                                group_user_profit_rate[0] <= user_profit_rate <= group_user_profit_rate[1] and
+                                user_win_lose >= group_min_user_win_lose):
 
-                            combined_results.append({
-                                **{col: key for col, key in zip(selected_columns, group_keys)},
-                                'combined_number_cost': sorted_combined_number_cost,
-                                'combined_rewards': total_rewards,
-                                'combined_total_cost': total_cost,
-                                'combined_unique_number_count': unique_number_count,
-                                'combined_average_cost': average_cost,
-                                'combined_user_win_lose': user_win_lose,
-                                'combined_user_profit_rate': user_profit_rate
-                            })
+                                combined_results.append({
+                                    **{col: key for col, key in zip(selected_columns, group_keys)},
+                                    'combined_number_cost': sorted_combined_number_cost,
+                                    'combined_rewards': total_rewards,
+                                    'combined_total_cost': total_cost,
+                                    'combined_unique_number_count': unique_number_count,
+                                    'combined_average_cost': average_cost,
+                                    'combined_user_win_lose': user_win_lose,
+                                    'combined_user_profit_rate': user_profit_rate
+                                })
 
-                            group_keys_formatted = format_group_keys(selected_columns, group_keys)
-                            st.write(f"Group with {group_keys_formatted}")
-                            st.dataframe(group_data)
-                            member_details_list.append(group_data)
-                            st.write("---")
+                                group_keys_formatted = format_group_keys(selected_columns, group_keys)
+                                st.write(f"Group with {group_keys_formatted}")
+                                st.dataframe(group_data)
+                                member_details_list.append(group_data)
+                                st.write("---")
 
-                    if member_details_list:
-                        member_details_df = pd.concat(member_details_list, ignore_index=True)
-                        csv_member_details = member_details_df.to_csv(index=False).encode('utf-8')
-                        st.download_button("Download Member Details as CSV", csv_member_details, 'member_details.csv', 'text/csv')
+                        if member_details_list:
+                            member_details_df = pd.concat(member_details_list, ignore_index=True)
+                            csv_member_details = member_details_df.to_csv(index=False).encode('utf-8')
+                            st.download_button("Download Member Details as CSV", csv_member_details, 'member_details.csv', 'text/csv')
 
-                    if combined_results:
-                        combined_df = pd.DataFrame(combined_results)
-                        st.write("Filtered Combined Group Information:")
-                        st.dataframe(combined_df)
-                        csv_combined = combined_df.to_csv(index=False).encode('utf-8')
-                        st.download_button("Download Combined Group Data as CSV", csv_combined, 'filtered_combined_group_related.csv', 'text/csv')
+                        if combined_results:
+                            combined_df = pd.DataFrame(combined_results)
+                            st.write("Filtered Combined Group Information:")
+                            st.dataframe(combined_df)
+                            csv_combined = combined_df.to_csv(index=False).encode('utf-8')
+                            st.download_button("Download Combined Group Data as CSV", csv_combined, 'filtered_combined_group_related.csv', 'text/csv')
+                        else:
+                            st.info("No groups met the specified criteria.")
                     else:
-                        st.info("No groups met the specified criteria.")
-                else:
-                    st.info("No related records found for the selected criteria.")
-            except KeyError as e:
-                st.warning(f"Missing column: {e}")
+                        st.info("No related records found for the selected criteria.")
+                except KeyError as e:
+                    st.warning(f"Missing column: {e}")
 else:
     st.write("Please upload a CSV file.")
