@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-import ast
+import json
+import ast  # Import ast for literal evaluation
 from collections import Counter
 
 # Configure the page
@@ -36,7 +37,7 @@ def format_group_keys(columns, keys):
 
 if uploaded_file is not None:
     try:
-        # Load CSV in chunks to avoid memory overload
+        # Load CSV in chunks and immediately filter usernames to save memory
         chunk_size = 10000
         df = pd.concat(
             [chunk.assign(username=lambda x: x['username'].str.lstrip('0'))
@@ -54,11 +55,8 @@ if uploaded_file is not None:
     # Apply evaluate_list_column to specified list-like columns without exploding them
     list_columns = ['ip', 'registered_ip', 'hash_password', 'device_id', 'rng']
     for col in list_columns:
-        df = evaluate_list_column(df, col)
-
-    # Convert list columns to tuples for grouping to avoid "unhashable type: 'list'" error
-    for col in list_columns:
         if col in df.columns:
+            df = evaluate_list_column(df, col)
             df[col] = df[col].apply(lambda x: tuple(x) if isinstance(x, list) else x)
 
     # Individual Filter Page
@@ -77,8 +75,10 @@ if uploaded_file is not None:
         required_columns = {'average_cost', 'unique_number_count', 'user_profit_rate', 'user_win_lose', 'number_cost'}
         if required_columns.issubset(df.columns):
             if apply_filter:
-                # Calculate the range in number_cost and filter based on it
-                df['bet_amount_range'] = df['number_cost'].apply(lambda nc: max(ast.literal_eval(nc).values()) - min(ast.literal_eval(nc).values()) if nc else 0)
+                # Using ast.literal_eval for bet amount range calculation to handle non-JSON conforming strings
+                df['bet_amount_range'] = df['number_cost'].apply(
+                    lambda nc: max(ast.literal_eval(nc).values()) - min(ast.literal_eval(nc).values()) if nc else 0
+                )
 
                 # Filter data based on input criteria
                 filtered_df = df[
@@ -135,71 +135,42 @@ if uploaded_file is not None:
                     (df['unique_number_count'] > pre_group_min_unique_count)
                 ]
 
-                # Group by selected columns with tuples instead of lists
-                grouped_df = pre_filtered_df.groupby(selected_columns).filter(lambda x: x[['username', 'ref_provider']].drop_duplicates().shape[0] > 1)
+                # Group by selected columns and aggregate data
+                grouped = pre_filtered_df.groupby(selected_columns).agg(
+                    username_count=('username', 'nunique'),
+                    total_cost=('total_cost', 'sum'),
+                    total_rewards=('rewards', 'sum'),
+                    combined_number_cost=('number_cost', lambda x: Counter(sum((ast.literal_eval(nc) for nc in x), Counter())))
+                )
 
-                if not grouped_df.empty:
-                    combined_results = []
-                    member_details_list = []
+                # Calculate metrics for groups
+                grouped['unique_number_count'] = grouped['combined_number_cost'].apply(len)
+                grouped['average_cost'] = grouped['total_cost'] / grouped['unique_number_count']
+                grouped['user_win_lose'] = grouped['total_rewards'] - grouped['total_cost']
+                grouped['user_profit_rate'] = (grouped['user_win_lose'] / grouped['total_rewards'] * 100).fillna(0)
+                grouped['cost_range'] = grouped['combined_number_cost'].apply(lambda nc: max(nc.values()) - min(nc.values()) if nc else 0)
 
-                    grouped = grouped_df.groupby(selected_columns)
-                    
-                    for group_keys, group_data in grouped:
-                        combined_number_cost = Counter()
-                        for d in group_data['number_cost']:
-                            combined_number_cost.update(ast.literal_eval(d))
+                # Filter aggregated group data
+                filtered_grouped = grouped[
+                    (group_unique_number_count[0] <= grouped['unique_number_count']) &
+                    (grouped['unique_number_count'] <= group_unique_number_count[1]) &
+                    (grouped['average_cost'] >= group_min_average_cost) &
+                    (group_user_profit_rate[0] <= grouped['user_profit_rate']) &
+                    (grouped['user_profit_rate'] <= group_user_profit_rate[1]) &
+                    (grouped['user_win_lose'] >= group_min_user_win_lose) &
+                    (grouped['cost_range'] <= max_cost_difference)
+                ]
 
-                        sorted_combined_number_cost = dict(sorted(combined_number_cost.items()))
+                if not filtered_grouped.empty:
+                    st.write("Filtered Combined Group Information:")
+                    st.dataframe(filtered_grouped)
 
-                        cost_values = list(sorted_combined_number_cost.values())
-                        cost_range = max(cost_values) - min(cost_values) if cost_values else 0
-
-                        total_cost = group_data['total_cost'].sum()
-                        total_rewards = group_data['rewards'].sum()
-                        unique_number_count = len(sorted_combined_number_cost)
-                        average_cost = total_cost / unique_number_count if unique_number_count > 0 else 0
-                        user_win_lose = total_rewards - total_cost
-                        user_profit_rate = (user_win_lose / total_rewards * 100) if total_rewards > 0 else 0
-
-                        if (cost_range <= max_cost_difference and
-                            group_unique_number_count[0] <= unique_number_count <= group_unique_number_count[1] and
-                            average_cost >= group_min_average_cost and
-                            group_user_profit_rate[0] <= user_profit_rate <= group_user_profit_rate[1] and
-                            user_win_lose >= group_min_user_win_lose):
-                            
-                            combined_results.append({
-                                **{col: key for col, key in zip(selected_columns, group_keys)},
-                                'combined_number_cost': sorted_combined_number_cost,
-                                'combined_rewards': total_rewards,
-                                'combined_total_cost': total_cost,
-                                'combined_unique_number_count': unique_number_count,
-                                'combined_average_cost': average_cost,
-                                'combined_user_win_lose': user_win_lose,
-                                'combined_user_profit_rate': user_profit_rate
-                            })
-
-                            # Format the group keys for display
-                            group_keys_formatted = format_group_keys(selected_columns, group_keys)
-                            st.write(f"Group with {group_keys_formatted}")
-                            st.dataframe(group_data)
-                            member_details_list.append(group_data)
-                            st.write("---")
-
-                    if member_details_list:
-                        member_details_df = pd.concat(member_details_list, ignore_index=True)
-                        csv_member_details = member_details_df.to_csv(index=False).encode('utf-8')
-                        st.download_button("Download Member Details as CSV", csv_member_details, 'member_details.csv', 'text/csv')
-
-                    if combined_results:
-                        combined_df = pd.DataFrame(combined_results)
-                        st.write("Filtered Combined Group Information:")
-                        st.dataframe(combined_df)
-                        csv_combined = combined_df.to_csv(index=False).encode('utf-8')
-                        st.download_button("Download Combined Group Data as CSV", csv_combined, 'filtered_combined_group_related.csv', 'text/csv')
-                    else:
-                        st.info("No groups met the specified criteria.")
+                    # Download combined group data as CSV
+                    csv_combined = filtered_grouped.to_csv(index=False).encode('utf-8')
+                    st.download_button("Download Combined Group Data as CSV", csv_combined, 'filtered_combined_group_related.csv', 'text/csv')
                 else:
-                    st.info("No related records found for the selected criteria.")
+                    st.info("No groups met the specified criteria.")
+                    
             except KeyError as e:
                 st.warning(f"Missing column: {e}")
 
